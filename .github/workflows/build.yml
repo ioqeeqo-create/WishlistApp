@@ -1,0 +1,50 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decode Certificate
+        run: |
+          echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          echo "$PROFILE_BASE64" | base64 --decode > profile.mobileprovision
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.CERTIFICATE_BASE64 }}
+          PROFILE_BASE64: ${{ secrets.PROFILE_BASE64 }}
+
+      - name: Install Certificate
+        run: |
+          security create-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "${{ secrets.CERT_PASSWORD }}" -T /usr/bin/codesign
+          security list-keychains -s build.keychain
+          security default-keychain -s build.keychain
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: Build Archive
+        run: |
+          xcodebuild clean archive \
+            -project Wishlist.xcodeproj \
+            -scheme Wishlist \
+            -archivePath build/Wishlist.xcarchive \
+            DEVELOPMENT_TEAM=${{ secrets.TEAM_ID }} \
+            CODE_SIGN_STYLE=Manual
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/Wishlist.xcarchive \
+            -exportPath build \
+            -exportOptionsPlist ExportOptions.plist
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wishlist-IPA
+          path: build/*.ipa
